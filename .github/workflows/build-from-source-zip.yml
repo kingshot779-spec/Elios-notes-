@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -26,18 +27,25 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
 
-      - name: Install Android SDK 36
+      - name: Accept Android licenses and install SDK 36
+        shell: bash
         run: |
+          set -e
           yes | sdkmanager --licenses
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
 
-      - name: Extract and build project
+      - name: Extract Phase B ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -45,27 +53,46 @@ jobs:
           ZIP_FILE="$GITHUB_WORKSPACE/ELIOS_NOTES_v82_phaseB_source.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: Phase B ZIP file was not found in repository root."
+            echo "::error::Phase B ZIP not found in repository root."
             exit 1
           fi
 
           mkdir -p "$GITHUB_WORKSPACE/extracted"
+
           unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/extracted"
 
-          SETTINGS_FILE="$(find "$GITHUB_WORKSPACE/extracted" -type f -name 'settings.gradle.kts' -print -quit)"
+          SETTINGS_FILE="$(find "$GITHUB_WORKSPACE/extracted" \
+            -type f -name 'settings.gradle.kts' -print -quit)"
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle.kts was not found inside the ZIP."
+            echo "::error::settings.gradle.kts not found inside ZIP."
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-          echo "Project directory: $PROJECT_DIR"
 
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project extracted to: $PROJECT_DIR"
+
+      - name: Generate Gradle Wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
 
-          gradle wrapper --gradle-version 8.13 --distribution-type bin
-          chmod +x ./gradlew
+          gradle wrapper \
+            --gradle-version 8.13 \
+            --distribution-type bin
+
+          chmod +x gradlew
+
+          ./gradlew --version
+
+      - name: Build and test ELIOS NOTES
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
 
           ./gradlew --no-daemon \
             lintDebug \
@@ -73,15 +100,25 @@ jobs:
             assembleDebug \
             --stacktrace
 
-          APK_FILE="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+      - name: Locate and prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK_FILE="$(find "$PROJECT_DIR/app/build/outputs/apk/debug" \
+            -type f -name '*.apk' -print -quit)"
 
           if [ -z "$APK_FILE" ]; then
-            echo "ERROR: APK was not produced."
+            echo "::error::APK was not generated."
             exit 1
           fi
 
           mkdir -p "$GITHUB_WORKSPACE/output"
-          cp "$APK_FILE" "$GITHUB_WORKSPACE/output/ELIOS_NOTES-debug.apk"
+
+          cp "$APK_FILE" \
+            "$GITHUB_WORKSPACE/output/ELIOS_NOTES-debug.apk"
+
+          echo "APK successfully prepared."
 
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
@@ -101,3 +138,4 @@ jobs:
             extracted/**/build/test-results/**
           if-no-files-found: ignore
           retention-days: 14
+description: 
