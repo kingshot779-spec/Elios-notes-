@@ -30,11 +30,17 @@ jobs:
         with:
           packages: "platform-tools"
 
-      - name: Accept Android licenses and install SDK 36
+      - name: Accept licenses and install Android SDK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+
+          # Avoid a harmless SIGPIPE from the yes command
+          set +o pipefail
           yes | sdkmanager --licenses
+          set -o pipefail
+
+          # Install required Android packages
           sdkmanager \
             "platform-tools" \
             "platforms;android-36" \
@@ -72,12 +78,14 @@ jobs:
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project extracted to: $PROJECT_DIR"
+
+          echo "Project directory: $PROJECT_DIR"
 
       - name: Generate Gradle Wrapper
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           gradle wrapper \
@@ -92,6 +100,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$PROJECT_DIR"
 
           ./gradlew --no-daemon \
@@ -118,7 +127,7 @@ jobs:
           cp "$APK_FILE" \
             "$GITHUB_WORKSPACE/output/ELIOS_NOTES-debug.apk"
 
-          echo "APK successfully prepared."
+          echo "APK prepared successfully."
 
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
@@ -138,4 +147,3 @@ jobs:
             extracted/**/build/test-results/**
           if-no-files-found: ignore
           retention-days: 14
-description: 
